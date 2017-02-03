@@ -1,0 +1,242 @@
+%{
+/* need this for the call to atof() below */
+#include <math.h>
+#include <string.h>
+int yylineno,ws,t;
+#define SIZE 200 
+#define MAXTOKENLEN 40
+#define SHIFT 4 
+
+static int hash ( char * key )
+{ int temp = 0;
+  int i = 0;
+  while (key[i] != '\0')
+  { temp = ((temp << SHIFT) + key[i]) % SIZE;
+    ++i;
+  }
+  return temp;
+}
+
+
+
+typedef struct RefListRec { 
+     int lineno;
+     struct RefListRec * next;
+     /* ADDED */
+     int type;
+} * RefList;
+
+
+/* hash entry holds variable name and its reference list */
+typedef struct HashRec { 
+     char st_name[MAXTOKENLEN];
+     int st_size;
+     RefList lines;
+     int st_value;
+     /* ADDED */
+     char st_type[MAXTOKENLEN];
+     struct HashRec * next;
+} * Node;
+
+/* the hash table */
+static Node hashTable[SIZE];
+void insert( char * name, int len, char * type, int lineno )
+{ 
+  /* ADDED */
+  /*int len = strlen(name);*/
+  int h = hash(name);
+  Node l =  hashTable[h];
+  while ((l != NULL) && (strcmp(name,l->st_name) != 0))
+    l = l->next;
+  if (l == NULL) /* variable not yet in table */
+  { l = (Node) malloc(sizeof(struct HashRec));
+    strncpy(l->st_name, name, len);  
+    /* ADDED */
+    strcpy(l->st_type,type);
+    l->lines = (RefList) malloc(sizeof(struct RefListRec));
+    l->lines->lineno = lineno;
+    l->lines->next = NULL;
+    l->next = hashTable[h];
+    hashTable[h] = l; }
+  else /* found in table, so just add line number */
+  { RefList t = l->lines;
+    while (t->next != NULL) t = t->next;
+    t->next = (RefList) malloc(sizeof(struct RefListRec));
+    t->next->lineno = lineno;
+    t->next->next = NULL;
+  }
+} 
+
+/* return value (address) of symbol if found or -1 if not found */
+int lookup ( char * name )
+{ int h = hash(name);
+  Node l =  hashTable[h];
+  while ((l != NULL) && (strcmp(name,l->st_name) != 0))
+    l = l->next;
+  if (l == NULL) return -1;
+  else return l->st_value;
+}
+
+/* return type value of symbol or -1 if symbol not found */
+char * lookupType( char * name )
+{
+  int h = hash(name);
+  Node l =  hashTable[h];
+  while ((l != NULL) && (strcmp(name,l->st_name) != 0))
+    l = l->next;
+  if (l == NULL) return NULL;
+  else return l->st_type;
+}
+
+/* set datatype of symbol returns 0 if symbol not found */
+int setType( char * name, char * t )
+{
+   int h = hash(name);
+   Node l =  hashTable[h];
+   while ((l != NULL) && (strcmp(name,l->st_name) != 0))
+     l = l->next;
+   if (l == NULL) return -1;
+   else {
+     strcpy(l->st_type,t);
+     return 0;
+   }
+}
+
+
+void printSymTable()
+{ 
+
+  FILE *fp;
+  fp = fopen("sym_tab.txt", "w");
+ 
+
+  int i;
+  fprintf(fp,"name\t\t\t type\t\t\t lineno\n");
+  for(i=0;i<SIZE;i++){
+    Node l =  hashTable[i];
+    while(l != NULL){
+    fprintf(fp,"%s\t\t\t %s\t\t\t",l->st_name,l->st_type);
+    RefList t = l->lines;
+    while (t != NULL) {
+        fprintf(fp,"%d ",t->lineno);
+        t = t->next;
+    }
+    fprintf(fp,"\n\n");
+    l = l->next;
+    }
+    
+  }
+  fclose(fp);
+}
+
+
+
+%}
+
+DIGIT    [0-9]
+ID       [a-zA-Z_][a-z_A-Z0-9]*
+ALPHANUM {DIGIT}|{ID}
+DATE 	 ((([1][0-3](th|TH))|([0|2]?[3](rd|RD))|([0-2]?[4-9](th|TH))|([0|2]?[2](nd|ND))|([0|2]?[1](st|ST))|([2|3][0](th|TH)))[ ]?((Apr(il)?)|(Jun(e)?)|(Sept(ember)?)|(Nov(ember)?)))[ ]?(([0|1][0-9][0-9][0-9])|([2][0][0|1][0-7]))|((([1][0-3](th|TH))|([0|2]?[3](rd|RD))|([0-2]?[4-9](th|TH))|([0|2]?[2](nd|ND))|([0|2]?[1](st|ST))|([2|3][0](th|TH))|((31)(st|ST)))[ ]?((Jan(uary)?)|(Mar(ch)?)|(May)|(Jul(y)?)|(Aug(ust)?)|(Oct(ober)?)|(Dec(ember)?)))[ ]?(([0|1][0-9][0-9][0-9])|([2][0][0|1][0-7]))
+
+%%
+
+,          {printf("%4d\t", yylineno);printf( "Comma: %s\n", yytext );
+            }
+
+\n          {++yylineno;}
+
+[/][/].*    {printf("%4d\t", yylineno);
+                            printf("Single line comment: %s\n", yytext);}
+
+[/][\*](.*[\n]*.*)*[\*][/] {printf("%4d\t", yylineno);
+                            printf("Multiline comment: ");
+                            int i;
+                            for(i = 0; i<strlen(yytext);i++){
+                                if(yytext[i]=='\n'){
+                                    yylineno++;
+                                    printf("\n%4d\t", yylineno);   
+                                } else 
+                                printf( "%c", yytext[i]);
+                            }
+                            printf("\n");
+                        }
+
+"/*"([^*/]|("*"+[^/]))*    {printf("%4d\t", yylineno);printf("ERROR:UNMATCHED COMMENT ENDING: %s\n", yytext);}
+
+\"[^"\n]*	{printf("%4d\t", yylineno);printf("ERROR:INVALID STRING: %s\n", yytext);}
+
+
+{DIGIT}+[a-zA-Z0-9]+    {printf("%4d\t", yylineno);printf("ERROR: UNACCEPTABLE IDENTIFIER FORMAT!\n");}
+
+
+{DIGIT}+    { printf("%4d\t", yylineno);printf( "An integer: %s \n", yytext );
+                insert(yytext,(int)yyleng,"constant",yylineno);
+			 }
+
+{DIGIT}+"."{DIGIT}*        {printf("%4d\t", yylineno);printf( "A float: %s \n", yytext);              
+                            insert(yytext,(int)yyleng,"constant",yylineno);
+                            }
+
+{DATE}			{printf("%4d\t", yylineno);printf( "A date: %s \n", yytext);              
+                            insert(yytext,(int)yyleng,"constant",yylineno);
+                            }
+            
+int			{printf("%4d\t", yylineno);printf("A datatype-int\n");
+            insert(yytext,(int)yyleng,"datatype",yylineno);}
+
+char 		{printf("%4d\t", yylineno);printf("A datatype-char\n");
+            insert(yytext,(int)yyleng,"datatype",yylineno);}
+
+if|then|begin|end|procedure|function|scanf|printf|while|return|do|for {
+                printf("%4d\t", yylineno);printf( "A keyword: %s\n", yytext );
+                insert(yytext,(int)yyleng,"keyword",yylineno);}
+
+(\*{ID})|({ID}"[]")|(\*\ {ID})|({ID}\[{ALPHANUM}+\])|({ID}\[{ALPHANUM}+\]\[{ALPHANUM}+\])       {printf("%4d\t", yylineno);printf( "Character array: %s\n", yytext );
+            insert(yytext,(int)yyleng,"identifier",yylineno);}
+			
+			
+{ID}        {printf("%4d\t", yylineno);printf( "An identifier: %s\n", yytext );
+            insert(yytext,(int)yyleng,"identifier",yylineno);}
+
+["].*["]   {printf("%4d\t", yylineno);printf( "in printf: %s\n", yytext );
+            insert(yytext,(int)yyleng,"In printf",yylineno);}
+
+"{"|"}"|"("|")"|","|"#"|";"|"/"			{printf("%4d\t", yylineno);printf("Symbols: %s\n", yytext );
+                                        insert(yytext,(int)yyleng,"Symbols",yylineno);}
+
+"++"|"--"|"+"|"-"|"*"|"/"|"="|"<"|">"   {printf("%4d\t", yylineno);printf( "An operator: %s\n", yytext );
+                                            insert(yytext,(int)yyleng,"operator",yylineno);}
+
+											
+%.			{printf("%4d\t", yylineno);printf("Format Specifier: %s\n", yytext );
+                insert(yytext,(int)yyleng,"format Specifier",yylineno);}
+
+&.			{printf("%4d\t", yylineno);printf("Address Specifier: %s\n", yytext );
+        insert(yytext,(int)yyleng,"Address Specifier",yylineno);}
+
+"{"[^}\n]*"}"     /* eat up one-line comments */
+
+
+
+#include.*   {printf("%4d\t", yylineno);printf("Header file: %s\n", yytext );
+                insert(yytext,(int)yyleng,"Header file",yylineno);}
+ 
+
+\t          {++t;}
+
+
+
+.           {++ws;}
+
+
+
+%%
+
+void main()
+{
+    yyin = fopen( "source.c", "r" );
+    yylex();
+    printf("\nthere are %d white spaces and %d tabs\n",ws,t);
+    printSymTable();
+}
+
