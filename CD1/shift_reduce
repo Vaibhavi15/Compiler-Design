@@ -1,0 +1,12 @@
+State 318
+
+  185 selection_statement: IF '(' expression ')' statement .
+  186                    | IF '(' expression ')' statement . ELSE statement
+
+    ELSE  shift, and go to state 328
+
+    ELSE      [reduce using rule 185 (selection_statement)]
+    $default  reduce using rule 185 (selection_statement)
+
+
+State 318 conflicts: 1 shift/reduce
